@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include <BluetoothSerial.h>
 #include <FastLED.h>
-#include <HCSR04.h>
 
 #define NUM_LEDS 4
 #define DATA_PIN 23
@@ -22,27 +21,26 @@
 #define BL 2
 #define BR 3
 
-UltraSonicDistanceSensor sensor(US_TRIG_PIN, US_ECHO_PIN, 100);
+#define CLIENT CRGB::Green
+#define NOCLIENT CRGB::Red
 
-enum
+namespace mask
 {
-    CLIENT = CRGB::Green,
-    NOCLIENT = CRGB::Red,
-    DIR_FORWARD = 1 << 7,
-    DIR_LEFT = 1 << 6,
-    DIR_BACKWARD = 1 << 5,
-    DIR_RIGHT = 1 << 4,
-    ROT_LEFT = 1 << 3,
-    ROT_RIGHT = 1 << 2,
-    STOP = 0
-};
+    enum
+    {
+        FORWARD = 1 << 0,
+        LEFT = 1 << 1,
+        DOWN = 1 << 2,
+        RIGHT = 1 << 3,
+        ROT_LEFT = 1 << 4,
+        ROT_RIGHT = 1 << 5,
+    };
+}
 
 BluetoothSerial bluetooth;
 CRGB leds[NUM_LEDS];
 
 int clientState = NOCLIENT;
-int change = 0;
-int vel = 128;
 
 void setup()
 {
@@ -81,73 +79,68 @@ void loop()
             ledcWrite(LEFT_SPEED, 0);
             ledcWrite(RIGHT_SPEED, 0);
         }
-        if (bluetooth.connected())
-            bluetooth.write(map(sensor.measureDistanceCm(), 0, 100, 0, 255));
     }
 
-    if (bluetooth.available())
+    if (bluetooth.available() >= 2)
     {
-        char c = bluetooth.read();
-        if (c & 1)
-            vel = c;
-        FastLED.setBrightness(vel);
+        byte state = bluetooth.read();
+        byte speed = bluetooth.read();
+        FastLED.setBrightness(speed);
         fill_solid(leds, NUM_LEDS, CRGB::Green);
-        switch (c)
+
+        ledcWrite(LEFT_SPEED, speed);
+        ledcWrite(RIGHT_SPEED, speed);
+
+        if (!state)
         {
-        case ROT_LEFT:
-            digitalWrite(LEFT_DIRECTION, LOW);
-            digitalWrite(RIGHT_DIRECTION, LOW);
-            ledcWrite(LEFT_SPEED, vel);
-            ledcWrite(RIGHT_SPEED, vel);
-            leds[BL] = CRGB::Blue;
-            leds[FR] = CRGB::Blue;
-            break;
-        case ROT_RIGHT:
-            digitalWrite(LEFT_DIRECTION, HIGH);
-            digitalWrite(RIGHT_DIRECTION, HIGH);
-            ledcWrite(LEFT_SPEED, vel);
-            ledcWrite(RIGHT_SPEED, vel);
-            leds[FL] = CRGB::Blue;
-            leds[BR] = CRGB::Blue;
-            break;
-        case DIR_BACKWARD:
-            digitalWrite(LEFT_DIRECTION, HIGH);
-            digitalWrite(RIGHT_DIRECTION, LOW);
-            ledcWrite(LEFT_SPEED, vel);
-            ledcWrite(RIGHT_SPEED, vel);
-            leds[FL] = CRGB::Blue;
-            leds[FR] = CRGB::Blue;
-            break;
-        case DIR_RIGHT:
-            digitalWrite(LEFT_DIRECTION, HIGH);
-            digitalWrite(RIGHT_DIRECTION, HIGH);
-            ledcWrite(LEFT_SPEED, vel);
-            ledcWrite(RIGHT_SPEED, 0);
-            leds[FL] = CRGB::Blue;
-            leds[BL] = CRGB::Blue;
-            break;
-        case DIR_LEFT:
-            digitalWrite(LEFT_DIRECTION, LOW);
-            digitalWrite(RIGHT_DIRECTION, LOW);
-            ledcWrite(LEFT_SPEED, 0);
-            ledcWrite(RIGHT_SPEED, vel);
-            leds[FR] = CRGB::Blue;
-            leds[BR] = CRGB::Blue;
-            break;
-        case DIR_FORWARD:
-            digitalWrite(LEFT_DIRECTION, LOW);
-            digitalWrite(RIGHT_DIRECTION, HIGH);
-            ledcWrite(LEFT_SPEED, vel);
-            ledcWrite(RIGHT_SPEED, vel);
-            leds[BL] = CRGB::Blue;
-            leds[BR] = CRGB::Blue;
-            break;
-        case STOP:
             ledcWrite(LEFT_SPEED, 0);
             ledcWrite(RIGHT_SPEED, 0);
-            FastLED.clear();
         }
+        if (state & mask::FORWARD)
+        {
+            digitalWrite(LEFT_DIRECTION, LOW);
+            digitalWrite(RIGHT_DIRECTION, HIGH);
+            leds[BL] = CRGB::Blue;
+            leds[BR] = CRGB::Blue;
+        }
+        if (state & mask::LEFT)
+        {
+            digitalWrite(LEFT_DIRECTION, LOW);
+            digitalWrite(RIGHT_DIRECTION, LOW);
+            ledcWrite(LEFT_SPEED, 0);
+            leds[FR] = CRGB::Blue;
+            leds[BR] = CRGB::Blue;
+        }
+        if (state & mask::DOWN)
+        {
+            digitalWrite(LEFT_DIRECTION, HIGH);
+            digitalWrite(RIGHT_DIRECTION, LOW);
+            leds[FL] = CRGB::Blue;
+            leds[BL] = CRGB::Blue;
+        }
+        if (state & mask::RIGHT)
+        {
+            digitalWrite(LEFT_DIRECTION, HIGH);
+            digitalWrite(RIGHT_DIRECTION, HIGH);
+            ledcWrite(RIGHT_SPEED, 0);
+            leds[FL] = CRGB::Blue;
+            leds[BR] = CRGB::Blue;
+        }
+        if (state & mask::ROT_LEFT)
+        {
+            digitalWrite(LEFT_DIRECTION, LOW);
+            digitalWrite(RIGHT_DIRECTION, LOW);
+            leds[BL] = CRGB::Blue;
+            leds[FR] = CRGB::Blue;
+        }
+        if (state & mask::ROT_RIGHT)
+        {
+            digitalWrite(LEFT_DIRECTION, HIGH);
+            digitalWrite(RIGHT_DIRECTION, HIGH);
+            leds[FL] = CRGB::Blue;
+            leds[BR] = CRGB::Blue;
+        }
+
         FastLED.show();
-        Serial.println((int)c);
     }
 }
