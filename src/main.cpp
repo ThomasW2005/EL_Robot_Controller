@@ -1,6 +1,9 @@
 #include <Arduino.h>
 #include <BluetoothSerial.h>
 #include <FastLED.h>
+#include <vector>
+
+// #define DEBUG
 
 #define NUM_LEDS 4
 #define DATA_PIN 23
@@ -16,31 +19,41 @@
 #define RIGHT_DIRECTION 15
 #define RIGHT_PIN 2
 
-#define FR 0
-#define FL 1
-#define BL 2
-#define BR 3
-
-#define CLIENT CRGB::Green
-#define NOCLIENT CRGB::Red
+namespace led_pos
+{
+    enum
+    {
+        front_right = 0,
+        front_left = 1,
+        back_left = 2,
+        back_right = 3
+    };
+}
 
 namespace mask
 {
     enum
     {
-        FORWARD = 1 << 0,
-        LEFT = 1 << 1,
-        DOWN = 1 << 2,
-        RIGHT = 1 << 3,
-        ROT_LEFT = 1 << 4,
-        ROT_RIGHT = 1 << 5,
+        FORWARD = 1,
+        LEFT = 2,
+        DOWN = 3,
+        RIGHT = 4,
+        ROT_LEFT = 5,
+        ROT_RIGHT = 6,
+        SET_SPEED = 7,
+        CLIENT,
+        NOCLIENT
     };
 }
 
+std::vector<byte> keys;
 BluetoothSerial bluetooth;
 CRGB leds[NUM_LEDS];
+byte speed = 255;
+byte clientState = mask::NOCLIENT;
 
-int clientState = NOCLIENT;
+void vector_add_or_remove(std::vector<byte> &v, byte value);
+void print_vector(std::vector<byte> v);
 
 void setup()
 {
@@ -56,91 +69,114 @@ void setup()
     ledcSetup(RIGHT_SPEED, 50, 8);
     ledcAttachPin(LEFT_PIN, RIGHT_SPEED);
     ledcAttachPin(RIGHT_PIN, LEFT_SPEED);
+#ifdef DEBUG
     Serial.println("Setup done");
+#endif
 }
 
 void loop()
 {
     EVERY_N_MILLISECONDS(50)
     {
-        if (bluetooth.hasClient() && clientState == NOCLIENT)
+        if (bluetooth.hasClient() && clientState == mask::NOCLIENT)
         {
-            clientState = CLIENT;
+            clientState = mask::CLIENT;
             fill_solid(leds, NUM_LEDS, CRGB::Green);
             FastLED.show();
+#ifdef DEBUG
             Serial.println("Client connected");
+#endif
         }
-        else if (!bluetooth.hasClient() && clientState == CLIENT)
+        else if (!bluetooth.hasClient() && clientState == mask::CLIENT)
         {
-            clientState = NOCLIENT;
+            clientState = mask::NOCLIENT;
             fill_solid(leds, NUM_LEDS, CRGB::Red);
             FastLED.show();
+#ifdef DEBUG
             Serial.println("Client disconnected");
+#endif
             ledcWrite(LEFT_SPEED, 0);
             ledcWrite(RIGHT_SPEED, 0);
         }
     }
 
-    if (bluetooth.available() >= 2)
+    if (bluetooth.isReady() && bluetooth.available())
     {
-        byte state = bluetooth.read();
-        byte speed = bluetooth.read();
+        byte state = bluetooth.read(); // each keypress gets put onto the stack and gets removed if release event is triggered (namespace mask)
+
+        if (state == mask::SET_SPEED)
+            speed = bluetooth.read();
+        else
+            vector_add_or_remove(keys, state);
+#ifdef DEBUG
+        print_vector(keys);
+#endif
+
         FastLED.setBrightness(speed);
         fill_solid(leds, NUM_LEDS, CRGB::Green);
-
         ledcWrite(LEFT_SPEED, speed);
         ledcWrite(RIGHT_SPEED, speed);
 
-        if (!state)
+        switch (keys[keys.size() - 1])
         {
-            ledcWrite(LEFT_SPEED, 0);
-            ledcWrite(RIGHT_SPEED, 0);
-        }
-        if (state & mask::FORWARD)
-        {
+        case mask::FORWARD:
             digitalWrite(LEFT_DIRECTION, LOW);
             digitalWrite(RIGHT_DIRECTION, HIGH);
-            leds[BL] = CRGB::Blue;
-            leds[BR] = CRGB::Blue;
-        }
-        if (state & mask::LEFT)
-        {
+            leds[led_pos::front_left] = CRGB::Blue;
+            leds[led_pos::front_right] = CRGB::Blue;
+            break;
+        case mask::LEFT:
             digitalWrite(LEFT_DIRECTION, LOW);
             digitalWrite(RIGHT_DIRECTION, LOW);
             ledcWrite(LEFT_SPEED, 0);
-            leds[FR] = CRGB::Blue;
-            leds[BR] = CRGB::Blue;
-        }
-        if (state & mask::DOWN)
-        {
+            leds[led_pos::front_left] = CRGB::Blue;
+            break;
+        case mask::DOWN:
             digitalWrite(LEFT_DIRECTION, HIGH);
             digitalWrite(RIGHT_DIRECTION, LOW);
-            leds[FL] = CRGB::Blue;
-            leds[BL] = CRGB::Blue;
-        }
-        if (state & mask::RIGHT)
-        {
+            leds[led_pos::back_left] = CRGB::Blue;
+            leds[led_pos::back_right] = CRGB::Blue;
+            break;
+        case mask::RIGHT:
             digitalWrite(LEFT_DIRECTION, HIGH);
             digitalWrite(RIGHT_DIRECTION, HIGH);
             ledcWrite(RIGHT_SPEED, 0);
-            leds[FL] = CRGB::Blue;
-            leds[BR] = CRGB::Blue;
-        }
-        if (state & mask::ROT_LEFT)
-        {
+            leds[led_pos::front_right] = CRGB::Blue;
+            break;
+        case mask::ROT_LEFT:
             digitalWrite(LEFT_DIRECTION, LOW);
             digitalWrite(RIGHT_DIRECTION, LOW);
-            leds[BL] = CRGB::Blue;
-            leds[FR] = CRGB::Blue;
-        }
-        if (state & mask::ROT_RIGHT)
-        {
+            leds[led_pos::front_left] = CRGB::Blue;
+            leds[led_pos::back_right] = CRGB::Blue;
+            break;
+        case mask::ROT_RIGHT:
             digitalWrite(LEFT_DIRECTION, HIGH);
             digitalWrite(RIGHT_DIRECTION, HIGH);
-            leds[FL] = CRGB::Blue;
-            leds[BR] = CRGB::Blue;
+            leds[led_pos::back_left] = CRGB::Blue;
+            leds[led_pos::front_right] = CRGB::Blue;
+            break;
+        default:
+            ledcWrite(LEFT_SPEED, 0);
+            ledcWrite(RIGHT_SPEED, 0);
+            break;
         }
-
         FastLED.show();
     }
+}
+
+void print_vector(std::vector<byte> v)
+{
+    Serial.printf("<Stack size=%d>\n", v.size());
+    std::for_each(v.begin(), v.end(), [](byte b)
+                  { Serial.println(b); });
+    Serial.printf("</Stack>\n");
+}
+
+void vector_add_or_remove(std::vector<byte> &v, byte value)
+{
+    auto it = std::find(v.begin(), v.end(), value);
+    if (it != v.end())
+        v.erase(it);
+    else
+        v.push_back(value);
 }
