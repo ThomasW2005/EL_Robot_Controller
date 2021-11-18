@@ -1,3 +1,5 @@
+// by thomas & lauze
+
 #include <Arduino.h>
 #include <BluetoothSerial.h>
 #include <FastLED.h>
@@ -18,6 +20,9 @@
 #define RIGHT_SPEED 1
 #define RIGHT_DIRECTION 15
 #define RIGHT_PIN 2
+
+#define BUMP_RIGHT 34
+#define BUMP_LEFT 35
 
 namespace led_pos
 {
@@ -51,6 +56,8 @@ BluetoothSerial bluetooth;
 CRGB leds[NUM_LEDS];
 byte speed = 255;
 byte clientState = mask::NOCLIENT;
+unsigned long lastTime = 0;
+bool bump = false;
 
 void vector_add_or_remove(std::vector<byte> &v, byte value);
 void print_vector(std::vector<byte> v);
@@ -65,6 +72,8 @@ void setup()
     FastLED.show();
     pinMode(LEFT_DIRECTION, OUTPUT);
     pinMode(RIGHT_DIRECTION, OUTPUT);
+    pinMode(BUMP_RIGHT, INPUT_PULLUP);
+    pinMode(BUMP_LEFT, INPUT_PULLUP);
     ledcSetup(LEFT_SPEED, 50, 8);
     ledcSetup(RIGHT_SPEED, 50, 8);
     ledcAttachPin(LEFT_PIN, RIGHT_SPEED);
@@ -98,6 +107,24 @@ void loop()
             ledcWrite(LEFT_SPEED, 0);
             ledcWrite(RIGHT_SPEED, 0);
         }
+    }
+
+    if (millis() > lastTime + 200 && bump)
+    {
+        bump = false;
+        ledcWrite(LEFT_SPEED, 0);
+        ledcWrite(RIGHT_SPEED, 0);
+    }
+
+    if (!digitalRead(BUMP_RIGHT) || !digitalRead(BUMP_LEFT))
+    {
+        bump = true;
+        lastTime = millis();
+        digitalWrite(LEFT_DIRECTION, HIGH);
+        digitalWrite(RIGHT_DIRECTION, LOW);
+#ifdef DEBUG
+        Serial.println("Bump detected");
+#endif
     }
 
     if (bluetooth.isReady() && bluetooth.available())
